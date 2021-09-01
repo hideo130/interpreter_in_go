@@ -26,7 +26,7 @@ func (l *Lexer) NextToken() token.Token {
 			ch := l.ch
 			l.readChar()
 			// ch type is byte. ch + l.ch is byte operation.
-			// but we get == so, convert string.
+			// but we want to get == so, convert string.
 			tok = token.Token{Type: token.EQ, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(token.ASSIGN, l.ch)
@@ -133,4 +133,8 @@ func (l *Lexer) peekChar() byte {
 	} else {
 		return l.input[l.readPosition]
 	}
+}
+
+func (l *Lexer) GetInput() string {
+	return l.input
 }
