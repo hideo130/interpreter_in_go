@@ -14,6 +14,14 @@ var (
 
 func Eval(node ast.Node, env *object.Environment) object.Object {
 	switch node := node.(type) {
+	case *ast.ArrayLiteral:
+		elements := evalExpressions(node.Elements, env)
+		// Why do we check length of elements?
+		// Why　don't we check other elements except elements[0]?
+		if len(elements) == 1 && isError(elements[0]) {
+			return elements[0]
+		}
+		return &object.Array{Elements: elements}
 	case *ast.BlockStatement:
 		return evalBlockStatement(node, env)
 	case *ast.CallExpression:
@@ -36,6 +44,18 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return evalIfExpression(node, env)
 	case *ast.IntegerLiteral:
 		return &object.Integer{Value: node.Value}
+	case *ast.IndexExpression:
+		// node.Left
+		// node.Index.Value
+		left := Eval(node.Left, env)
+		if isError(left) {
+			return left
+		}
+		index := Eval(node.Index, env)
+		if isError(index) {
+			return index
+		}
+		return evalIndexExpression(left, index)
 	case *ast.InfixExpression:
 		left := Eval(node.Left, env)
 		if isError(left) {
@@ -64,6 +84,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			return val
 		}
 		return &object.ReturnValue{Value: val}
+	case *ast.StringLiteral:
+		return &object.String{Value: node.Value}
 	case *ast.ExpressionStatement:
 		return Eval(node.Expression, env)
 	case *ast.LetStatement:
@@ -77,19 +99,23 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 }
 
 func applyFunction(fn object.Object, args []object.Object) object.Object {
-	function, ok := fn.(*object.Function)
-	if !ok {
-		return newError("not a functon: %s", fn.Type())
+	switch fn := fn.(type) {
+	case *object.Function:
+		extendedEnv := extendFunctionEnv(fn, args)
+		evaluated := Eval(fn.Body, extendedEnv)
+		return unwrapReturnValue(evaluated)
+
+	case *object.Builtin:
+		return fn.Fn(args...)
+	default:
+		return newError("not a function: %s", fn.Type())
 	}
-	extendedEnv := extendFunctionEnv(function, args)
-	evaluated := Eval(function.Body, extendedEnv)
-	return unwrapReturnValue(evaluated)
 }
 
 func extendFunctionEnv(fn *object.Function, args []object.Object) *object.Environment {
 	env := object.NewEnclosedEnvironment(fn.Env)
 
-	for paramIdx, param:= range fn.Parameters{
+	for paramIdx, param := range fn.Parameters {
 		env.Set(param.Value, args[paramIdx])
 	}
 
@@ -97,7 +123,7 @@ func extendFunctionEnv(fn *object.Function, args []object.Object) *object.Enviro
 }
 
 func unwrapReturnValue(obj object.Object) object.Object {
-	if returnValue, ok := obj.(*object.ReturnValue); ok{
+	if returnValue, ok := obj.(*object.ReturnValue); ok {
 		return returnValue.Value
 	}
 	return obj
@@ -111,9 +137,22 @@ func nativeBoolToBooleanObject(input bool) *object.Boolean {
 	}
 }
 
+func evalArrayIndexExpression(array, index object.Object) object.Object {
+	// Why do we use object.Object for array type, instead of object.Array
+	// In this function array is guaranteed to be object.Array
+	arrayObject := array.(*object.Array)
+	idx := index.(*object.Integer).Value
+	max := int64(len(arrayObject.Elements) - 1)
+	if idx < 0 || idx > max {
+		return NULL
+	}
+	return arrayObject.Elements[idx]
+}
 
 func evalExpressions(exps []ast.Expression, env *object.Environment) []object.Object {
 	// Why is this function return array of object.Object
+	// Because it evaluates array or argumens like elements [1,2,"foo"] or fn(1,a) and return correspond objects.
+	// So this function return array.
 	var result []object.Object
 
 	for _, e := range exps {
@@ -188,17 +227,31 @@ func isTruthy(obj object.Object) bool {
 }
 
 func evalIdentifier(node *ast.Identifier, env *object.Environment) object.Object {
-	val, ok := env.Get(node.Value)
-	if !ok {
-		return newError("identifier not found: " + node.Value)
+	if val, ok := env.Get(node.Value); ok {
+		return val
 	}
-	return val
+	if builtin, ok := builtins[node.Value]; ok {
+		return builtin
+	}
+	return newError("identifier not found: " + node.Value)
+}
+
+func evalIndexExpression(left, index object.Object) object.Object {
+	switch {
+
+	case left.Type() == object.ARRAY_OBJ && index.Type() == object.INTEGER_OBJ:
+		return evalArrayIndexExpression(left, index)
+	default:
+		return newError("index operator not supported: %s", left.Type())
+	}
 }
 
 func evalInfixExpression(operator string, left, right object.Object) object.Object {
 	switch {
 	case right.Type() == object.INTEGER_OBJ && left.Type() == object.INTEGER_OBJ:
 		return evalIntegerInfixExpression(operator, left, right)
+	case right.Type() == object.STRING_OBJ && left.Type() == object.STRING_OBJ:
+		return evalStringInfixExpression(operator, left, right)
 	case operator == "==":
 		return nativeBoolToBooleanObject(left == right)
 	case operator == "!=":
@@ -237,6 +290,21 @@ func evalIntegerInfixExpression(operator string, left, right object.Object) obje
 		return newError("unknown operator: -%s", right.Type())
 	}
 
+}
+
+func evalStringInfixExpression(operator string, left, right object.Object) object.Object {
+	lvalue := left.(*object.String).Value
+	rvalue := right.(*object.String).Value
+	switch operator {
+	case "+":
+		return &object.String{Value: lvalue + rvalue}
+	case "==":
+		return nativeBoolToBooleanObject(lvalue == rvalue)
+	case "!=":
+		return nativeBoolToBooleanObject(lvalue != rvalue)
+	default:
+		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
+	}
 }
 
 func evalMinusPrefixOperatorExpression(right object.Object) object.Object {

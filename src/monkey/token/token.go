@@ -18,6 +18,7 @@ const (
 	IF     = "IF"
 	ELSE   = "ELSE"
 	RETURN = "RETURN"
+	STRING = "STRING"
 
 	// Operators
 	ASSIGN   = "="
@@ -38,6 +39,9 @@ const (
 	RPAREN    = ")"
 	LBRACE    = "{"
 	RBRACE    = "}"
+	LBRACKET  = "["
+	RBRACKET  = "]"
+
 	// Keywords
 	FUNCTION = "FUNCTION"
 	LET      = "LET"
@@ -59,6 +63,6 @@ func LookupIdent(ident string) TokenType {
 	if tok, ok := keywords[ident]; ok {
 		return tok
 	}
-	// Like x, y, i are identity. 
+	// Like x, y, i are identity.
 	return IDENT
 }
